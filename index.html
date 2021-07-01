@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<head>
+    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    <!-- jQuery and JavaScript Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Vue -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12"></script>
+    <!-- CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <title>Game intorduced by Wan</title>
+    <div id="app">
+        {{message}}
+        <!-- 进入房间前的组件 -->
+        <div id="beforeGame">
+            <input placeholder="在这输入游戏ID" v-model="user">
+            <br>
+            <button id="createBtn" onclick="createRoom()" type="button" class="btn btn-primary">创建房间</button>
+            <br>
+            <div class="joinBtn">
+                <button v-for="(value, key, index) in roomList" v-on:click="joinRoom(value)">
+                    {{ value.owner.ownername }}
+                </button>
+            </div>
+        </div>
+
+        <!-- 进入房间后等待开始的组件 -->
+        <div id="waitGame" style="display: none;">
+            <p id="waitingPer">当前房间玩家:{{ waitingPlayer }}</p>
+            <button onclick="ttt()">test</button>
+        </div>
+
+        <!-- 游戏正式进行 -->
+        <div id="inGame">
+
+        </div>
+    </div>
+</body>
+<script>
+    const socket = io("http://localhost:3000");
+    socket.emit("listRoom");
+
+    // 进行进入等待界面时的组件切换
+    before2wait = function() {
+        document.getElementById("beforeGame").style.display = "none";
+        document.getElementById("waitGame").style.display = "block";
+    }
+
+    // 创建游戏房间
+    createRoom = function() {
+        before2wait();
+        socket.emit('createRoom', {id: socket.id, name: app.user});
+        app.waitingPlayer = app.user;
+    }
+
+    // 在有人创建房间后，接收后台广播的房间信息
+    socket.on("listingRoom", data => {
+        console.log(data);
+        app.roomList[data.owner.ownerid] = data;
+    })
+
+    // 初始化读取房间信息
+    socket.on('roomlist', data => {
+        app.roomList = data;
+    });
+
+    // 获取同一个房间中等待的用户信息
+    socket.on('playersWating', data => {
+        app.waitingPlayer = "";
+        for(let i = 0; i < data.length; i++) {
+            app.waitingPlayer += data[i] + ' ';
+        }
+    });
+
+    // 通过点击按钮加入某个房间
+    joinRoom = function(room) {
+        before2wait();
+        console.log(room);
+        socket.emit('joinRoom', {user: app.user, roomid: room.owner.ownerid});
+    }
+
+
+    ttt = function() {
+        socket.emit('event', "htllo");
+    }
+
+    let app = new Vue({
+        el:'#app',
+        data:{
+            message:"Hello Vue",
+            roomList:{},
+            waitingPlayer:"",
+            user:""
+        }
+    });
+</script>
