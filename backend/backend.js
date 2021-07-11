@@ -54,6 +54,7 @@ createPool = function(room, client) {
 	} 
 
 	// Init players' card struct
+	readyStat[room] = {};
 	for(let key in players) {
 		let player = players[key];
 		stat[player] = {
@@ -61,6 +62,7 @@ createPool = function(room, client) {
 			card: {2: 0, 3: 0, 8: 0, 9: 0, 'K': 0}
 		};
 		// readyStat[room][player] = false;// TODO: to be checked
+		readyStat[room][player] = false;
 	}
 
 	// Select cards for players
@@ -113,9 +115,9 @@ startGame = function(data, client) {
 }
 
 
-// TODO: receive signal from all client, when finished, start turn of game
-beginTurn = function(data, client) {
-	let room = data.roomid;
+// receive signal from all client, when finished, start turn of game
+readyToStart = function(data, client) {
+	let room = data.room;
 	let player = data.user;
 	readyStat[room][player] = true;
 	let checked = true;
@@ -143,7 +145,7 @@ io.on('connection', client => {
 	client.on('listRoom', () => { client.emit('roomlist', roomList); });
 	client.on('joinRoom', data => { joinRoom(data, client); });
 	client.on('startGame', data => { startGame(data, client); });
-	client.on('beginTurn', data => { beginTurn(data, client); });// TODO: add function to begin turn
+	client.on('readyToStart', data => { readyToStart(data, client); });// TODO: add function to begin turn
 });
 
 
