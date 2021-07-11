@@ -59,9 +59,9 @@ createPool = function(room, client) {
 		let player = players[key];
 		stat[player] = {
 			health: 2,
-			card: {2: 0, 3: 0, 8: 0, 9: 0, 'K': 0}
+			card: {2: 0, 3: 0, 8: 0, 9: 0, 'K': 0},
+			resource: 0
 		};
-		// readyStat[room][player] = false;// TODO: to be checked
 		readyStat[room][player] = false;
 	}
 
@@ -131,12 +131,64 @@ readyToStart = function(data, client) {
 	}
 	if(checked) {
 		io.to(room).emit("turnStart");// begin turn and loop, until game finished
+		console.log(roomStat[room]);
+		let curPlayer;
+		for(let user in roomStat[room].stat) {
+			curPlayer = user;
+			break;
+		}
+		turnOnPlayer(client, room, curPlayer);
 	}
 }
 
 // TODO: function for a turn
-turnOnPlayer = function(client, player) {
-	client.emit("place1");
+turnOnPlayer = function(client, room, curPlayer) {
+	io.to(room).emit("state0", {room: room, cur: curPlayer});
+}
+
+
+drawCard = function(data, client) {
+	let room = data.room;
+	let player = data.player;
+	io.to(room).emit("receiveCard", {room: room, player: player});
+	roomStat[room].stat[player].resource += 2;
+	io.to(room).emit("freshStat", roomStat[room].stat);
+}
+
+
+aliveList = function(room, client) {
+	let stat = roomStat[room].stat;
+	let aliveInfo = {};
+	for(let key in stat) {
+		let player = stat[key];
+		if(player.health > 0) {
+			aliveInfo[key] = player.health;
+		}
+	} 
+	// io.to(room).emit("receiveTarget", aliveInfo);
+	client.emit("receiveTarget", aliveInfo);
+}
+
+
+// TODO: target a player to kill
+killPlayer = function(data, client) {
+	let room = data.room;
+	let killer = data.killer;
+	let killee= data.killee;
+	roomStat[room].stat[killer].resource -= 7;
+	roomStat[room].stat[killee].health--;
+	console.log(killer, "has killed", killee);
+	io.to(room).emit("loseHealth", killee);
+	// TODO: some things after killee die
+}
+
+// lose card after attacked
+loseCard = function(data, client) {
+	let room = data.room;
+	let card = data.card;
+	let player = data.player;
+	roomStat[room].stat[player].card[card]--;
+	io.to(room).emit("freshStat", roomStat[room].stat);
 }
 
 io.on('connection', client => {
@@ -146,6 +198,10 @@ io.on('connection', client => {
 	client.on('joinRoom', data => { joinRoom(data, client); });
 	client.on('startGame', data => { startGame(data, client); });
 	client.on('readyToStart', data => { readyToStart(data, client); });// TODO: add function to begin turn
+	client.on('drawCard', data => { drawCard(data, client); });
+	client.on('killPlayer', data => { killPlayer(data, client); });
+	client.on('aliveList', room => { aliveList(room, client); });
+	client.on('loseCard', data => { loseCard(data, client); });
 });
 
 

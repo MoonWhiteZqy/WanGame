@@ -45,7 +45,33 @@
         <!-- 游戏正式进行 -->
         <div id="inGame" style="display: none;">
             <p>游戏进行中</p>
-            <p v-for="info in card">{{info}}</p>
+            <p v-for="info in card" style="display: none;">{{info}}</p>
+            <div v-for="(value, key, index) in stat">
+                <p v-if="">{{key}} : health: {{value.health}} resource: {{value.resource}}</p>
+                <!-- 这里需要补充
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                
+                -->
+            </div>
+            <button id="drawBtn" onclick="drawfn()">抽牌</button>
+            <button id="killBtn" onclick="prekill()" v-if="resource > 6">刺杀</button>
+            <div id="killtars" style="display: none;">
+                <button v-for="(health, player, index) in aliveList" v-on:click="killfn(player)">
+                    {{player}} : {{health}}
+                </button>
+            </div>
+            <div id="card2lose" style="display: none;">
+                <button v-for="(value, key, index) in cardLose" v-if="value > 0" v-on:click="loseCard(key)">{{key}}</button>
+            </div>
         </div>
     </div>
 </body>
@@ -105,11 +131,13 @@
         wait2start();
         // app.card = data.stat[app.user]['card'];
         console.log(data);
-        let stat = data.stat;
+        app.stat = data.stat;
+        let stat = app.stat;
         for(let key in stat) {
             // 对于当前用户，暴露自己的卡牌信息
             if(key == app.user) {
                 let infoword = key + ":";
+                app.cardLose = stat[key].card;
                 for(let i in stat[key].card) {
                     for(let j = 0; j < stat[key].card[i]; j++) {
                         infoword += i;
@@ -149,6 +177,69 @@
         socket.emit('startGame', {user: app.user, roomid: socket.id});
     }
 
+    // 回合开始的选择阶段
+    socket.on("state0", data => {
+        let room = data.room;
+        let curPlayer = data.cur;
+        console.log("in state 0");
+        console.log(data);
+    });
+
+    // 抽牌函数
+    drawfn = function() {
+        socket.emit("drawCard", {room: app.room, player: app.user});
+    }
+
+    // 发送抽牌请求后接受资源
+    socket.on("receiveCard", data => {
+        let room = data.room;
+        let player = data.player;
+        if(room === app.room && player === app.user) {
+            app.resource += 2;
+            app.stat[player].resource += 2;
+        }
+    });
+
+    // 即将刺杀玩家，获取可刺杀玩家的列表？？？
+    socket.on("receiveTarget", data => {
+        app.aliveList = data;
+        document.getElementById("killtars").style.display = "block";
+    });
+
+    // 刺杀时显露目标
+    prekill = function() {
+        socket.emit("aliveList", app.room);
+    }
+
+    // 刺杀函数
+    killfn = function(killee) {
+        app.resource -= 7;
+        app.stat[app.user].resource -= 7;
+        document.getElementById("killtars").style.display = "none";
+        socket.emit("killPlayer", {room: app.room, killer: app.user, killee: killee});
+    }
+
+    // 刺杀后即将失去生命，选择失去的卡牌          这里需要完善
+    socket.on("loseHealth", killee => {
+        if(killee === app.user) {
+            document.getElementById("card2lose").style.display = "block";
+        }
+    });
+
+    // 失去生命后失去卡牌，实际失去生命的函数
+    loseCard = function(card) {
+        app.cardLose[card]--;
+        if(app.cardLose[card] === 0) {
+            delete app.cardLose.card;
+        }
+        socket.emit("loseCard", {room: app.room, card: card, player: app.user});
+        document.getElementById("card2lose").style.display = "none";
+    }
+
+    // 刷新状态
+    socket.on("freshStat", data => {
+        app.stat = data;
+    });
 
     let app = new Vue({
         el:'#app',
@@ -158,7 +249,11 @@
             roomList:{},
             waitingPlayer:"",
             user:"",
-            card:[]
+            card:[],
+            resource: 0,
+            aliveList: {},
+            cardLose:{},
+            stat:{}
         }
     });
 </script>
