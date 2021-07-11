@@ -70,6 +70,7 @@
         before2wait();
         socket.emit('createRoom', {id: socket.id, name: app.user});
         app.waitingPlayer = app.user;
+        app.room = socket.id;
     }
 
     // 在有人创建房间后，接收后台广播的房间信息
@@ -120,6 +121,7 @@
                 app.card.push(key + ":??");
             }
         }
+        socket.emit("readyToStart", {user: app.user, room: app.room});
     });
 
     // 接收要刷新页面的信息
@@ -128,11 +130,17 @@
         location.reload();
     })
 
+    // 开始轮转
+    socket.on("turnStart", data => {
+        console.log("turn start");
+    })
+
     // 通过点击按钮加入某个房间
     joinRoom = function(room) {
         before2wait();
         console.log(room);
         document.getElementById("startGameBtn").style.display = "none";// 因为加入别人房间，所以没有权限开始游戏
+        app.room = room.owner.ownerid;
         socket.emit('joinRoom', {user: app.user, roomid: room.owner.ownerid});
     }
 
@@ -146,6 +154,7 @@
         el:'#app',
         data:{
             message:"Hello Vue",
+            room:"",
             roomList:{},
             waitingPlayer:"",
             user:"",
