@@ -1,13 +1,23 @@
 <!DOCTYPE html>
 <head>
-    <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script>
+    
+    <!-- <script src="https://cdn.socket.io/4.1.2/socket.io.min.js"></script> -->
     <!-- jQuery and JavaScript Bundle with Popper -->
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script> -->
     <!-- Vue -->
-    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12"></script>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/vue@2.6.12"></script> -->
     <!-- CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css" rel="stylesheet"> -->
+
+    <script src="./src/socketio.js"></script>
+    <!-- jQuery and JavaScript Bundle with Popper -->
+    <script src="./src/jquery.slim.min.js"></script>
+    <script src="./src/bootstrapbundle.js"></script>
+    <!-- Vue -->
+    <script src="./src/vue@2.6.12"></script>
+    <!-- CSS -->
+    <link href="./src/bootstrap.css" rel="stylesheet">
 </head>
 <body>
     <title>Game intorduced by Wan</title>
@@ -29,12 +39,13 @@
         <!-- 进入房间后等待开始的组件 -->
         <div id="waitGame" style="display: none;">
             <p id="waitingPer">当前房间玩家:{{ waitingPlayer }}</p>
-            <button onclick="ttt()">test</button>
+            <button class="btn btn-primary" id="startGameBtn" onclick="startGame()">开始游戏</button>
         </div>
 
         <!-- 游戏正式进行 -->
-        <div id="inGame">
-
+        <div id="inGame" style="display: none;">
+            <p>游戏进行中</p>
+            <p v-for="info in card">{{info}}</p>
         </div>
     </div>
 </body>
@@ -46,6 +57,12 @@
     before2wait = function() {
         document.getElementById("beforeGame").style.display = "none";
         document.getElementById("waitGame").style.display = "block";
+    }
+
+    // 从等待模式到开始时的组件切换
+    wait2start = function() {
+        document.getElementById("waitGame").style.display = "none";
+        document.getElementById("inGame").style.display = "block";
     }
 
     // 创建游戏房间
@@ -67,24 +84,63 @@
     });
 
     // 获取同一个房间中等待的用户信息
-    socket.on('playersWating', data => {
+    socket.on('playersWaiting', data => {
         app.waitingPlayer = "";
         for(let i = 0; i < data.length; i++) {
             app.waitingPlayer += data[i] + ' ';
         }
     });
 
+    // 接收房间开始游戏信号，不再允许进入
+    socket.on('disableRoom', data => {
+        console.log(data);
+        console.log("disabled");
+        delete app.roomList[data];
+    });
+
+    // 接收游戏初始化时分到的角色
+    socket.on('initGame', data => {
+        // 进入游戏时的UI
+        wait2start();
+        // app.card = data.stat[app.user]['card'];
+        console.log(data);
+        let stat = data.stat;
+        for(let key in stat) {
+            // 对于当前用户，暴露自己的卡牌信息
+            if(key == app.user) {
+                let infoword = key + ":";
+                for(let i in stat[key].card) {
+                    for(let j = 0; j < stat[key].card[i]; j++) {
+                        infoword += i;
+                    }
+                }
+                app.card.push(infoword);
+            }
+            else {// 其余玩家，卡牌信息保留
+                app.card.push(key + ":??");
+            }
+        }
+    });
+
+    // 接收要刷新页面的信息
+    socket.on('refresh', () => {
+        alert("当前信息已经过时，即将刷新界面");
+        location.reload();
+    })
+
     // 通过点击按钮加入某个房间
     joinRoom = function(room) {
         before2wait();
         console.log(room);
+        document.getElementById("startGameBtn").style.display = "none";// 因为加入别人房间，所以没有权限开始游戏
         socket.emit('joinRoom', {user: app.user, roomid: room.owner.ownerid});
     }
 
-
-    ttt = function() {
-        socket.emit('event', "htllo");
+    // 房主开始游戏
+    startGame = function() {
+        socket.emit('startGame', {user: app.user, roomid: socket.id});
     }
+
 
     let app = new Vue({
         el:'#app',
@@ -92,7 +148,8 @@
             message:"Hello Vue",
             roomList:{},
             waitingPlayer:"",
-            user:""
+            user:"",
+            card:[]
         }
     });
 </script>
