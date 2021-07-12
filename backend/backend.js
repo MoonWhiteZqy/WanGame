@@ -6,6 +6,7 @@ const io = require('socket.io')(server, {cors:true});
 let roomList = {};
 let card = ['2', '3', '8', '9', 'K'];
 let roomStat = {};
+let suspectList = {};
 let cardprop = {
 	1:{ group: 1, selectnum: 3 },
 	2:{ group: 2, selectnum: 3 },
@@ -39,6 +40,15 @@ createRoom = function(data, client) {
 	client.broadcast.emit("listingRoom", roomList[data.id]);
 }
 
+
+// count property num of obj
+let objLength = function(obj) {
+	let num = 0;
+	for(let x in obj) {
+		num++;
+	}
+	return num;
+}
 
 // create a card pool for a game room
 createPool = function(room, client) {
@@ -80,9 +90,9 @@ createPool = function(room, client) {
 		}
 	}
 	roomList[room] = undefined;
-	// TODO: send a message to destroy button for this room
+	// send a message to destroy button for this room
 	client.broadcast.emit("disableRoom", room); 
-	thisRoom = {stat: stat, pool: pool};
+	thisRoom = {stat: stat, pool: pool, now: ""};
 	roomStat[room] = thisRoom;// confirm stat of room and return
 }
 
@@ -131,28 +141,23 @@ readyToStart = function(data, client) {
 	}
 	if(checked) {
 		io.to(room).emit("turnStart");// begin turn and loop, until game finished
-		console.log(roomStat[room]);
 		let curPlayer;
 		for(let user in roomStat[room].stat) {
 			curPlayer = user;
 			break;
 		}
-		turnOnPlayer(client, room, curPlayer);
 	}
 }
 
-// TODO: function for a turn
-turnOnPlayer = function(client, room, curPlayer) {
-	io.to(room).emit("state0", {room: room, cur: curPlayer});
-}
 
-
-drawCard = function(data, client) {
+drawCard = function(data) {
 	let room = data.room;
 	let player = data.player;
+	let resource = data.resource;
 	io.to(room).emit("receiveCard", {room: room, player: player});
-	roomStat[room].stat[player].resource += 2;
+	roomStat[room].stat[player].resource += resource;
 	io.to(room).emit("freshStat", roomStat[room].stat);
+	nextPlayer(room, player);
 }
 
 
@@ -170,16 +175,21 @@ aliveList = function(room, client) {
 }
 
 
-// TODO: target a player to kill
-killPlayer = function(data, client) {
+// target a player to kill
+killPlayer = function(data) {
 	let room = data.room;
 	let killer = data.killer;
 	let killee= data.killee;
-	roomStat[room].stat[killer].resource -= 7;
+	let consume = data.consume;
+	roomStat[room].stat[killer].resource -= consume;
 	roomStat[room].stat[killee].health--;
-	console.log(killer, "has killed", killee);
 	io.to(room).emit("loseHealth", killee);
-	// TODO: some things after killee die
+	if(roomStat[room].stat[killee].health === 0) {
+		io.to(room).emit("playerDie", killee);
+		io.to(room).emit("freshStat", roomStat[room].stat);
+		delete roomStat[room].stat[killee];
+	}
+	io.to(room).emit("freshStat", roomStat[room].stat);
 }
 
 // lose card after attacked
@@ -191,6 +201,164 @@ loseCard = function(data, client) {
 	io.to(room).emit("freshStat", roomStat[room].stat);
 }
 
+
+// receive declaration of hero
+receiveHero = function(data, client) {
+	io.to(data.room).emit("waitSuspect", data);
+	suspectList[data.room] = [];
+}
+
+
+// get power after other's suspect or without suspect
+getPower = function(room, player, hero, badGuy, restRob) {
+	suspectList[room] = [];// clear suspect list of this room
+	if(hero === '2') {
+		io.to(room).emit("canRobResource", player);
+	}
+	else if(hero === '3') {
+		drawCard({room: room, player: player, resource: 3});
+	}
+	else if(hero === '8') {
+		if(roomStat[room].now === "rob") {
+			roomStat[room].now = "";
+			if(restRob === 0) {
+				nextPlayer(room, badGuy);
+			}
+			io.to(room).emit("freshStat", roomStat[room].stat);
+		}
+		else {
+			io.to(room).emit("loseHealth", {player: player, eight: true});
+		}
+	}
+	else if(hero === '9') {
+		io.to(room).emit("canHit", {room: room, player: player});
+	}
+	else if(hero === 'K') {
+		roomStat[room].stat[badGuy].resource -= 3;
+		nextPlayer(room, badGuy);
+	}
+	else {
+		console.log(hero);
+	}
+}
+
+getAliveNum = function(stat) {
+	let num = 0;
+	for(let i in stat) {
+		if(stat[i].health > 0) {
+			num++;
+		}
+	}
+	return num;
+}
+
+// receive suspection of hero
+receiveSuspect = function(data, client) {
+	let user = data.user;
+	let ans = data.suspect;
+	let room = data.room;
+	let player = data.player;
+	let hero = data.hero;
+	let badGuy = data.badGuy;
+	let restRob = data.restRob;
+	if(ans === false) {
+		suspectList[room].push(user);
+		if(suspectList[room].length === getAliveNum(roomStat[room].stat)) {
+			getPower(room, player, hero, badGuy, restRob);
+		}
+	}
+	else {
+		io.to(room).emit("endSuspect");
+		if(roomStat[room].stat[player].card[hero] > 0) {// suspect fail, user lose health
+			killPlayer({room: room, killer: player, killee: user, consume: 0});
+			getPower(room, player, hero, badGuy, restRob);
+		}
+		else {// suspect succeed, player lose health
+			killPlayer({room: room, killer: user, killee: player, consume: 0});
+			nextPlayer(room, player);
+		}
+	}
+}
+
+
+// send hero to pool, and then select new hero
+handInHero = function(data, client) {
+	let room = data.room;
+	let player = data.player;
+	let hero = data.hero;
+	let looptime = cardprop[objLength(roomStat[room].stat)].selectnum;
+	let res = [];
+	roomStat[room].stat[player].card[hero]--;
+	for(let i = 0; i < looptime; i++) {
+		cardId = card[Math.floor(Math.random() * 5)];
+		if(roomStat[room]['pool'][cardId] > 0) {
+			roomStat[room]['pool'][cardId]--;
+			res.push(cardId);
+		}
+		else{
+			i--;
+		}
+	}
+	res.push(hero);
+	io.to(room).emit("selectNewHero", {player: player, pool: res});
+}
+
+
+// update hero for hero 8
+chooseHero = function(data, client) {
+	let room = data.room;
+	let player = data.player;
+	let newHero = data.newHero;
+	let restHero = data.restHero;
+	for(let i in newHero) {
+		roomStat[room].stat[player].card[newHero[i]]++;
+	}
+	for(let i in restHero) {
+		roomStat[room].pool[restHero[i]]++;
+	}
+	io.to(room).emit("freshStat", roomStat[room].stat);
+}
+
+// raise up rob action
+toBeRob = function(data, client) {
+	let room = data.room;
+	let robber = data.robber;
+	let robbee = data.robbee;
+	let restRob = data.restRob;
+	roomStat[room].now = "rob";
+	io.to(room).emit("willBeRob", {robber: robber, robbee: robbee, restRob: restRob});
+}
+
+
+giveUp = function(data, client) {
+	let room = data.room;
+	let user = data.user;
+	let tool = data.tool;
+	let badGuy = data.badGuy;
+	if(tool === '8') {
+		roomStat[room].stat[badGuy].resource++;
+		roomStat[room].stat[user].resource--;
+	}
+	else if(tool === 'K') {
+		killPlayer({room: room, killer: badGuy, killee: user, consume: 3});
+	}
+	else {
+		console.log("else");
+	}
+	nextPlayer(room, badGuy);
+}
+
+// power of 9, trying to killPlayer
+hitPlayer = function(data, client) {
+	io.to(data.room).emit("willBeHit", data);
+}
+
+
+//TODO: current player end this turn, time for next player
+nextPlayer = function(room, player) {
+	io.to(room).emit("freshStat", roomStat[room].stat);
+}
+
 io.on('connection', client => {
 	client.on('disconnect', () => {	console.log('disconnect'); });
 	client.on('createRoom', data => { createRoom(data, client);});
@@ -198,10 +366,18 @@ io.on('connection', client => {
 	client.on('joinRoom', data => { joinRoom(data, client); });
 	client.on('startGame', data => { startGame(data, client); });
 	client.on('readyToStart', data => { readyToStart(data, client); });// TODO: add function to begin turn
-	client.on('drawCard', data => { drawCard(data, client); });
+	client.on('drawCard', data => { drawCard(data); });
 	client.on('killPlayer', data => { killPlayer(data, client); });
 	client.on('aliveList', room => { aliveList(room, client); });
 	client.on('loseCard', data => { loseCard(data, client); });
+	client.on('declareHero', data => { receiveHero(data, client); });
+	client.on('suspect', data => { receiveSuspect(data, client); });
+	client.on('handInHero', data => { handInHero(data, client); });
+	client.on('addCard', data => { roomStat[data.room]['pool'][data.card]++; });
+	client.on('chooseHero', data => { chooseHero(data, client); });
+	client.on('toBeRob', data => { toBeRob(data, client); });
+	client.on('giveUp', data => { giveUp(data, client); });
+	client.on('hitPlayer', data => { hitPlayer(data, client); });
 });
 
 

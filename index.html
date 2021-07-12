@@ -45,32 +45,30 @@
         <!-- 游戏正式进行 -->
         <div id="inGame" style="display: none;">
             <p>游戏进行中</p>
-            <p v-for="info in card" style="display: none;">{{info}}</p>
+            <span id="declarationShow">{{declaration}}</span>
             <div v-for="(value, key, index) in stat">
-                <p v-if="">{{key}} : health: {{value.health}} resource: {{value.resource}}</p>
-                <!-- 这里需要补充
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                
-                -->
+                <span v-if="key === user" class="border border-primary">{{key}} : health: {{value.health}} resource: {{value.resource}}</span>
+                <span v-else v-on:click="robTarget(key)">{{key}} : health: {{value.health}} resource: {{value.resource}}</span>
             </div>
             <button id="drawBtn" onclick="drawfn()">抽牌</button>
-            <button id="killBtn" onclick="prekill()" v-if="resource > 6">刺杀</button>
+            <button v-for="(power, hero, index) in heroList" v-on:click="declareHero(hero)">{{hero}}</button>
+            <button id="killBtn" onclick="prekill(7)" v-if="resource > 6">刺杀</button>
+            <button id="suspectBtn" onclick="suspect(true)" style="display: none;">怀疑</button>
+            <button id="notSuspectBtn" onclick="suspect(false)" style="display: none;">同意</button>
             <div id="killtars" style="display: none;">
-                <button v-for="(health, player, index) in aliveList" v-on:click="killfn(player)">
+                <button v-for="(health, player, index) in aliveList" v-on:click="killfn(player)" v-if="player !== user">
                     {{player}} : {{health}}
                 </button>
             </div>
+            <div id="reaction" style="display: none;">
+                <button id="resistBtn" onclick="resistAction(true)">抵抗</button>
+                <button id="notResistBtn" onclick="resistAction(false)">不抵抗</button>
+            </div>
             <div id="card2lose" style="display: none;">
                 <button v-for="(value, key, index) in cardLose" v-if="value > 0" v-on:click="loseCard(key)">{{key}}</button>
+            </div>
+            <div id="hero2select">
+                <span v-for="(hero, index) in heroPool" v-on:click="chooseHero(hero, index)" class="border border-primary">{{hero}}</span>
             </div>
         </div>
     </div>
@@ -120,8 +118,6 @@
 
     // 接收房间开始游戏信号，不再允许进入
     socket.on('disableRoom', data => {
-        console.log(data);
-        console.log("disabled");
         delete app.roomList[data];
     });
 
@@ -129,8 +125,6 @@
     socket.on('initGame', data => {
         // 进入游戏时的UI
         wait2start();
-        // app.card = data.stat[app.user]['card'];
-        console.log(data);
         app.stat = data.stat;
         let stat = app.stat;
         for(let key in stat) {
@@ -138,15 +132,6 @@
             if(key == app.user) {
                 let infoword = key + ":";
                 app.cardLose = stat[key].card;
-                for(let i in stat[key].card) {
-                    for(let j = 0; j < stat[key].card[i]; j++) {
-                        infoword += i;
-                    }
-                }
-                app.card.push(infoword);
-            }
-            else {// 其余玩家，卡牌信息保留
-                app.card.push(key + ":??");
             }
         }
         socket.emit("readyToStart", {user: app.user, room: app.room});
@@ -187,7 +172,7 @@
 
     // 抽牌函数
     drawfn = function() {
-        socket.emit("drawCard", {room: app.room, player: app.user});
+        socket.emit("drawCard", {room: app.room, player: app.user, resource: 2});
     }
 
     // 发送抽牌请求后接受资源
@@ -200,46 +185,193 @@
         }
     });
 
-    // 即将刺杀玩家，获取可刺杀玩家的列表？？？
+    // 即将刺杀玩家，获取可刺杀玩家的列表
     socket.on("receiveTarget", data => {
         app.aliveList = data;
         document.getElementById("killtars").style.display = "block";
     });
 
     // 刺杀时显露目标
-    prekill = function() {
+    prekill = function(consume) {
+        app.consume = consume;
         socket.emit("aliveList", app.room);
     }
 
     // 刺杀函数
     killfn = function(killee) {
-        app.resource -= 7;
-        app.stat[app.user].resource -= 7;
+        app.resource -= app.consume;
+        app.stat[app.user].resource -= app.consume;
         document.getElementById("killtars").style.display = "none";
-        socket.emit("killPlayer", {room: app.room, killer: app.user, killee: killee});
+        if(app.consume === 7){
+            socket.emit("killPlayer", {room: app.room, killer: app.user, killee: killee, consume: 7});
+        }
+        else {
+            socket.emit("hitPlayer", {room: app.room, hitter: app.user, hittee: killee, consume: 3});
+        }
     }
 
-    // 刺杀后即将失去生命，选择失去的卡牌          这里需要完善
-    socket.on("loseHealth", killee => {
-        if(killee === app.user) {
+    // 刺杀后即将失去生命，选择失去的卡牌,或者是8技能上交一个卡牌
+    socket.on("loseHealth", data => {
+        if(data.player === app.user) {
             document.getElementById("card2lose").style.display = "block";
+        }
+        if(data.eight === true) {
+            app.powerOfEight = true;
         }
     });
 
-    // 失去生命后失去卡牌，实际失去生命的函数
+    // 失去英雄
     loseCard = function(card) {
         app.cardLose[card]--;
         if(app.cardLose[card] === 0) {
             delete app.cardLose.card;
         }
         socket.emit("loseCard", {room: app.room, card: card, player: app.user});
+        socket.emit("addCard", {room: app.room, card: card});
         document.getElementById("card2lose").style.display = "none";
+        if(app.powerOfEight === true) {
+            if(app.stat[app.user].health === 2) {
+                for(let key in app.stat[app.user].card) {
+                    if(app.stat[app.user].card[key] > 0) {
+                        app.stat[app.user].card[key]--;
+                        delete app.cardLose[key];
+                        socket.emit("handInHero", {room: app.room, player: app.user, hero: key});
+                    }
+                }
+            }
+        }
+        app.powerOfEight = false;
+    }
+
+    socket.on("selectNewHero", data => {
+        if(data.player === app.user) {
+            app.heroPool = data.pool;
+        }
+    });
+    
+
+    // 声明自己的英雄
+    declareHero = function(hero) {
+        socket.emit("declareHero", {room: app.room, player: app.user, hero: hero});
     }
 
     // 刷新状态
     socket.on("freshStat", data => {
-        app.stat = data;
+        try{
+            app.stat = data;
+            app.cardLose = data[app.user].card;
+            app.resource = app.stat[app.user].resource;
+        }
+        catch(err){
+            console.log(err);
+        }
     });
+
+    // 接收自己角色死亡信息
+    socket.on("playerDie", killee => {
+        if(killee === app.user){
+            let buttons = document.getElementsByTagName("button");
+            for(let i in buttons) {
+                buttons[i].disabled = true;
+            }
+        }
+    });
+
+    // 如果怀疑对象是自己，直接不怀疑，否则展示怀疑组件
+    socket.on("waitSuspect", data => {
+        if(data.player === app.user) {
+            data["suspect"] = false;
+            data["user"] = app.user;
+            socket.emit("suspect", data);
+        }
+        else {
+            app.declaration = data.player + "声明自己拥有" + data.hero;
+            document.getElementById("suspectBtn").style.display = "block";
+            document.getElementById("notSuspectBtn").style.display = "block";
+            app.candidate = data;
+        }
+    });
+
+    // 怀疑和肯定按钮的实现
+    suspect = function(attitude) {
+        document.getElementById("suspectBtn").style.display = "none";
+        document.getElementById("notSuspectBtn").style.display = "none";
+        app.candidate["suspect"] = attitude;
+        app.candidate["user"] = app.user;
+        socket.emit("suspect", app.candidate);
+    }
+
+    // 英雄8效果，重新选择英雄
+    chooseHero = function(hero, index) {
+        app.heroPool.splice(index, 1);
+        app.newHero.push(hero);
+        if(app.newHero.length === app.stat[app.user]['health']) {
+            socket.emit("chooseHero", {room: app.room, player: app.user, newHero: app.newHero, restHero: app.heroPool});
+            app.newHero = [];
+            app.heroPool = [];
+        }
+    }
+
+    // 使英雄获得两次抢夺他人机会
+    socket.on("canRobResource", player => {
+        if(player === app.user) {
+            app.canRob = 2;
+        }
+    });
+
+    // 英雄2的技能，抢夺其他人的资源
+    robTarget = function(target) {
+        if(app.canRob > 0 && app.stat[target].resource > 0) {
+            app.canRob--;
+            socket.emit("toBeRob", {room: app.room, robber: app.user, robbee: target, restRob: app.canRob});
+        }
+    }
+
+    // 包括对2和9的反击，反击效果为不被抢牌和伤害
+    resistAction = function(attitude) {
+        // 统一进行反击
+        if(attitude) {// 进行对应的反击
+            socket.emit("declareHero", {room: app.room, player: app.user, hero: app.resistHero, badGuy: app.badGuy, restRob: app.restRob});
+            app.restRob = 0;
+        }
+        else {
+            socket.emit("giveUp", {room: app.room, user: app.user, tool: app.resistHero, badGuy: app.badGuy});
+            app.badGuy = "";
+            app.resistHero = "";
+        }
+        document.getElementById("reaction").style.display = "none";
+    }
+
+    socket.on("willBeRob", data => {
+        if(data.robbee === app.user) {
+            document.getElementById("reaction").style.display = "block";
+            app.resistHero = "8";
+            app.badGuy = data.robber;
+            app.restRob = data.restRob;
+        }
+    });
+
+    // 英雄9的技能，消耗3个资源
+    socket.on("canHit", data => {
+        if(data.player === app.user) {
+            prekill(3);
+        }
+    });
+
+    // 成为9的目标
+    socket.on("willBeHit", data => {
+        if(data.hittee === app.user) {
+            document.getElementById("reaction").style.display = "block";
+            app.resistHero = "K";
+            app.badGuy = data.hitter;
+        }
+    });
+
+    // 有人怀疑，结束怀疑状态
+    socket.on("endSuspect", () => {
+        document.getElementById("suspectBtn").style.display = "none";
+        document.getElementById("notSuspectBtn").style.display = "none";
+    })
 
     let app = new Vue({
         el:'#app',
@@ -249,11 +381,27 @@
             roomList:{},
             waitingPlayer:"",
             user:"",
-            card:[],
             resource: 0,
             aliveList: {},
             cardLose:{},
-            stat:{}
+            stat:{},
+            heroList:{
+                2: "抢夺其他玩家的两份资源",
+                3: "获取三份资源",
+                8: "更换技能,不受抢夺",
+                9: "使用三份资源进行攻击",
+                'K': "不受攻击"
+            },
+            declaration:"",
+            candidate:{},
+            powerOfEight: false,
+            heroPool: [],
+            newHero:[],
+            canRob: 0,
+            resistHero: "",
+            badGuy:"",
+            restRob: 0,
+            consume: 7
         }
     });
 </script>
