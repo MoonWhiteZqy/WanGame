@@ -5,6 +5,10 @@ Vue + node + socket.io
 
 Usage:
 
-Backend: node backend/backend.js
+Backend: 
+
+npm install socket.io
+
+node backend/backend.js
 
 Front: index.html * n
