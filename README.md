@@ -7,8 +7,13 @@ Usage:
 
 Backend: 
 
+cd backend
+
 npm install socket.io
 
-node backend/backend.js
+node backend.js
+
+
+
 
 Front: index.html * n
