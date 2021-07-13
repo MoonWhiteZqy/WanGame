@@ -44,15 +44,22 @@
 
         <!-- 游戏正式进行 -->
         <div id="inGame" style="display: none;">
-            <p>游戏进行中</p>
+            <span>游戏中</span>
+            <br>
+            <span id="heroInfo"></span>
+            <br>
             <span id="declarationShow">{{declaration}}</span>
+            <br>
             <div v-for="(value, key, index) in stat">
                 <span v-if="key === user" class="border border-primary">{{key}} : health: {{value.health}} resource: {{value.resource}}</span>
                 <span v-else v-on:click="robTarget(key)">{{key}} : health: {{value.health}} resource: {{value.resource}}</span>
             </div>
-            <button id="drawBtn" onclick="drawfn()">抽牌</button>
-            <button v-for="(power, hero, index) in heroList" v-on:click="declareHero(hero)">{{hero}}</button>
-            <button id="killBtn" onclick="prekill(7)" v-if="resource > 6">刺杀</button>
+            <br>
+            <div id="btnAtStart">
+                <button id="drawBtn" onclick="drawfn()">抽牌</button>
+                <button v-for="(power, hero, index) in heroList" v-on:click="declareHero(hero)" v-if="hero !== '9' || resource > 2">{{hero}}</button>
+                <button id="killBtn" onclick="prekill(7)" v-if="resource > 6">刺杀</button>
+            </div>
             <button id="suspectBtn" onclick="suspect(true)" style="display: none;">怀疑</button>
             <button id="notSuspectBtn" onclick="suspect(false)" style="display: none;">同意</button>
             <div id="killtars" style="display: none;">
@@ -145,7 +152,13 @@
 
     // 开始轮转
     socket.on("turnStart", data => {
-        console.log("turn start");
+        let curPlayer = data.curPlayer;
+        if(curPlayer === app.user) {
+            document.getElementById("btnAtStart").style.display = "block";
+        }
+        else {
+            document.getElementById("btnAtStart").style.display = "none";
+        }
     })
 
     // 通过点击按钮加入某个房间
@@ -255,11 +268,22 @@
         socket.emit("declareHero", {room: app.room, player: app.user, hero: hero});
     }
 
+    cardObjToString = function(cardObj) {
+        let s = app.user + " 拥有英雄: ";
+        for(let card in cardObj) {
+            for(let j = 0; j < cardObj[card]; j++) {
+                s += card;
+            }
+        }
+        return s;
+    }
+
     // 刷新状态
     socket.on("freshStat", data => {
         try{
             app.stat = data;
             app.cardLose = data[app.user].card;
+            document.getElementById("heroInfo").innerText = cardObjToString(app.cardLose);
             app.resource = app.stat[app.user].resource;
         }
         catch(err){
@@ -335,7 +359,7 @@
             app.restRob = 0;
         }
         else {
-            socket.emit("giveUp", {room: app.room, user: app.user, tool: app.resistHero, badGuy: app.badGuy});
+            socket.emit("giveUp", {room: app.room, user: app.user, tool: app.resistHero, badGuy: app.badGuy, restRob: app.restRob});
             app.badGuy = "";
             app.resistHero = "";
         }
@@ -371,12 +395,24 @@
     socket.on("endSuspect", () => {
         document.getElementById("suspectBtn").style.display = "none";
         document.getElementById("notSuspectBtn").style.display = "none";
-    })
+    });
+
+    socket.on("message", message => {
+        app.message = message;
+    });
+
+    socket.on("endGame", data => {
+        if(data.winner === app.user) {
+            alert("获胜!");
+        }
+        else {
+            alert("胜利者是" + data.winner);
+        }
+    });
 
     let app = new Vue({
         el:'#app',
         data:{
-            message:"Hello Vue",
             room:"",
             roomList:{},
             waitingPlayer:"",
@@ -389,8 +425,7 @@
                 2: "抢夺其他玩家的两份资源",
                 3: "获取三份资源",
                 8: "更换技能,不受抢夺",
-                9: "使用三份资源进行攻击",
-                'K': "不受攻击"
+                9: "使用三份资源进行攻击"
             },
             declaration:"",
             candidate:{},
@@ -401,7 +436,8 @@
             resistHero: "",
             badGuy:"",
             restRob: 0,
-            consume: 7
+            consume: 7,
+            message: ""
         }
     });
 </script>

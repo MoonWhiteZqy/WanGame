@@ -17,6 +17,7 @@ let cardprop = {
 };
 let readyStat = {};
 let poolobj = { 2: 0,3: 0, 8: 0, 9:0, 'K': 0};
+let ownerOfRoom = {};
 
 // Create a room for game
 createRoom = function(data, client) {
@@ -35,6 +36,8 @@ createRoom = function(data, client) {
 	// Use owner's id as room's id
 	client.join(data.id);
 	roomList[data.id] = { owner: owner, player:[ data.name ]};
+
+	ownerOfRoom[data.id] = data.name;
 
 	// Send message to all other socket, to prove the existence of this room
 	client.broadcast.emit("listingRoom", roomList[data.id]);
@@ -140,15 +143,16 @@ readyToStart = function(data, client) {
 		}
 	}
 	if(checked) {
-		io.to(room).emit("turnStart");// begin turn and loop, until game finished
-		let curPlayer;
-		for(let user in roomStat[room].stat) {
-			curPlayer = user;
-			break;
-		}
+		io.to(room).emit("freshStat", roomStat[room].stat);
+		io.to(room).emit("turnStart", {curPlayer: ownerOfRoom[room]});// begin turn and loop, until game finished
 	}
 }
 
+
+// send message to room
+sendMessage = function(room, message) {
+	io.to(room).emit("message", message);
+}
 
 drawCard = function(data) {
 	let room = data.room;
@@ -156,6 +160,7 @@ drawCard = function(data) {
 	let resource = data.resource;
 	io.to(room).emit("receiveCard", {room: room, player: player});
 	roomStat[room].stat[player].resource += resource;
+	sendMessage(room, player + " has gain " + resource + " resource");
 	io.to(room).emit("freshStat", roomStat[room].stat);
 	nextPlayer(room, player);
 }
@@ -182,12 +187,15 @@ killPlayer = function(data) {
 	let killee= data.killee;
 	let consume = data.consume;
 	roomStat[room].stat[killer].resource -= consume;
-	roomStat[room].stat[killee].health--;
-	io.to(room).emit("loseHealth", killee);
-	if(roomStat[room].stat[killee].health === 0) {
-		io.to(room).emit("playerDie", killee);
-		io.to(room).emit("freshStat", roomStat[room].stat);
-		delete roomStat[room].stat[killee];
+	if(getIndexByKey(roomStat[room].stat, killee) !== -1) {
+		roomStat[room].stat[killee].health--;
+		io.to(room).emit("loseHealth", {player: killee});
+		sendMessage(room, killee + " hurt by " + killer + ", " + killee + " lose 1 hero");
+		if(roomStat[room].stat[killee].health === 0) {
+			io.to(room).emit("playerDie", killee);
+			io.to(room).emit("freshStat", roomStat[room].stat);
+			delete roomStat[room].stat[killee];
+		}
 	}
 	io.to(room).emit("freshStat", roomStat[room].stat);
 }
@@ -214,6 +222,7 @@ getPower = function(room, player, hero, badGuy, restRob) {
 	suspectList[room] = [];// clear suspect list of this room
 	if(hero === '2') {
 		io.to(room).emit("canRobResource", player);
+		sendMessage(room, player + " gain the power of 2");
 	}
 	else if(hero === '3') {
 		drawCard({room: room, player: player, resource: 3});
@@ -228,17 +237,19 @@ getPower = function(room, player, hero, badGuy, restRob) {
 		}
 		else {
 			io.to(room).emit("loseHealth", {player: player, eight: true});
+			sendMessage(room, player + " use the power of 8 to change hero");
 		}
 	}
 	else if(hero === '9') {
 		io.to(room).emit("canHit", {room: room, player: player});
 	}
 	else if(hero === 'K') {
+		sendMessage(room, player + " use the power of K to defend hit from " + badGuy);
 		roomStat[room].stat[badGuy].resource -= 3;
 		nextPlayer(room, badGuy);
 	}
 	else {
-		console.log(hero);
+		sendMessage(room, "Unknown bug");
 	}
 }
 
@@ -272,9 +283,21 @@ receiveSuspect = function(data, client) {
 		if(roomStat[room].stat[player].card[hero] > 0) {// suspect fail, user lose health
 			killPlayer({room: room, killer: player, killee: user, consume: 0});
 			getPower(room, player, hero, badGuy, restRob);
+			sendMessage(room, user + " suspect " + hero + " of " + player + " fail, " + user + " lose 1 hero");
 		}
 		else {// suspect succeed, player lose health
 			killPlayer({room: room, killer: user, killee: player, consume: 0});
+			sendMessage(room, user + " suspect " + hero + " of " + player + " succeed, " + player + " lose 1 hero");
+			if(hero === 'K') {
+				killPlayer({room: room, killer: badGuy, killee: player, consume: 3});
+			}
+			if(hero === '8') {
+				// TODO:unfinished
+				roomStat[room].stat[player].resource--;
+				roomStat[room].stat[badGuy].resource++;
+				io.to(room).emit("freshStat", roomStat[room].stat);
+
+			}
 			nextPlayer(room, player);
 		}
 	}
@@ -316,7 +339,8 @@ chooseHero = function(data, client) {
 	for(let i in restHero) {
 		roomStat[room].pool[restHero[i]]++;
 	}
-	io.to(room).emit("freshStat", roomStat[room].stat);
+	sendMessage(room, player + " has change his heros");
+	nextPlayer(room, player);
 }
 
 // raise up rob action
@@ -336,31 +360,68 @@ giveUp = function(data, client) {
 	let tool = data.tool;
 	let badGuy = data.badGuy;
 	if(tool === '8') {
+		sendMessage(room, user + "didn't declare 8 and got rob by " + badGuy);
 		roomStat[room].stat[badGuy].resource++;
 		roomStat[room].stat[user].resource--;
+		io.to(room).emit("freshStat", roomStat[room].stat);
 	}
 	else if(tool === 'K') {
+		sendMessage(room, user + "didn't declare K and got hit by " + badGuy);
 		killPlayer({room: room, killer: badGuy, killee: user, consume: 3});
 	}
 	else {
 		console.log("else");
 	}
+	if(data.restRob !== 0) return ;
 	nextPlayer(room, badGuy);
 }
 
 // power of 9, trying to killPlayer
 hitPlayer = function(data, client) {
 	io.to(data.room).emit("willBeHit", data);
+	sendMessage(data.room, data.hitter + " trying to hit " + data.hittee);
 }
 
 
+getKeyByIndex = function(obj, index) {
+	let i = 0;
+	let res;
+	for(let x in obj) {
+		if(i === index) {
+			res = x;
+			break;
+		}
+		i++;
+	}
+	return res;
+}
+
+getIndexByKey = function(obj, key) {
+	let i = 0;
+	for(let x in obj) {
+		if(x === key) {
+			return i;
+		}
+		i++;
+	}
+	return -1;
+}
+
 //TODO: current player end this turn, time for next player
 nextPlayer = function(room, player) {
+	let stat = roomStat[room].stat;
+	let len = objLength(stat);
+	let curIndex = getIndexByKey(stat, player);
+	let nextOne = getKeyByIndex(stat, (curIndex + 1) % len);
+	if(nextOne === player) {
+		io.to(room).emit("endGame", {winner: player});
+	}
+	io.to(room).emit("turnStart", {curPlayer: nextOne});
 	io.to(room).emit("freshStat", roomStat[room].stat);
 }
 
 io.on('connection', client => {
-	client.on('disconnect', () => {	console.log('disconnect'); });
+	// client.on('disconnect', () => {	console.log('disconnect'); });
 	client.on('createRoom', data => { createRoom(data, client);});
 	client.on('listRoom', () => { client.emit('roomlist', roomList); });
 	client.on('joinRoom', data => { joinRoom(data, client); });

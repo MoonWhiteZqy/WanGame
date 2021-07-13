@@ -3,4 +3,8 @@ This is a game introduced by Wan
 
 Vue + node + socket.io
 
-Still unfinished
+Usage:
+
+Backend: node backend/backend.js
+
+Front: index.html * n
